@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PromptFuzzer</title>
+  <meta name="description" content="Fuzz testing for LLM applications">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23141413'/%3E%3Cpath d='M8 22l5-12 4 8 3-5 4 9' stroke='%233987e5' stroke-width='2.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <a class="brand" href="#/">
+        <svg viewBox="0 0 32 32" width="28" height="28" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#232322"/><path d="M8 22l5-12 4 8 3-5 4 9" stroke="#3987e5" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <span>PromptFuzzer</span>
+      </a>
+      <nav class="nav" aria-label="Workflow">
+        <div class="nav-section">Workflow</div>
+        <a href="#/task" data-route="task"><span class="step">1</span>Define task</a>
+        <a href="#/generate" data-route="generate"><span class="step">2</span>Generate tests</a>
+        <a href="#/run" data-route="run"><span class="step">3</span>Run tests</a>
+        <a href="#/runs" data-route="runs"><span class="step">4</span>Reports</a>
+        <div class="nav-section">Explore</div>
+        <a href="#/demo" data-route="demo"><span class="step dot">◆</span>Demo report</a>
+        <a href="#/" data-route="home"><span class="step dot">?</span>How it works</a>
+      </nav>
+      <div class="sidebar-foot" id="key-status"></div>
+    </aside>
+    <main class="main" id="view" tabindex="-1"></main>
+  </div>
+  <div id="drawer-root"></div>
+  <div id="toasts" aria-live="polite"></div>
+  <script type="module" src="/js/app.js"></script>
+</body>
+</html>
