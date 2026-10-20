@@ -14,7 +14,8 @@ import io.promptfuzzer.evaluation.Evaluation;
  * @param model       target id
  * @param repeat      0-based repetition index
  * @param rawOutput   the response exactly as received (untrusted; always rendered as text)
- * @param error       transport or provider error, when the call failed
+ * @param error       why the call failed or was skipped, with what to do about it
+ * @param issue       classification of an {@code ERROR} or {@code SKIPPED} result, null for graded ones
  */
 public record TestResult(
         String id,
@@ -33,7 +34,8 @@ public record TestResult(
         long outputTokens,
         Double costUsd,
         String stopReason,
-        String error) {
+        String error,
+        RunIssue issue) {
 
     public Evaluation.Verdict verdict() {
         return evaluation.verdict();

@@ -5,6 +5,13 @@ import { donut, barRows, histogram, legend, meter, seriesColor, STATUS } from '.
 import { categoryName, behaviorBadge } from './generate.js';
 import { statusBadge } from './runs.js';
 
+/** Shown wherever a pass rate could not be measured because nothing was graded. Never rendered as 0%. */
+const NA = 'N/A';
+const graded = (m) => (m.passed || 0) + (m.failed || 0);
+const rateText = (x, digits) => (x == null ? NA : fmt.pct(x, digits));
+const ciText = (m) => (m.passRateLow == null ? 'not enough data' : `95% CI ${fmt.pct(m.passRateLow, 0)}–${fmt.pct(m.passRateHigh, 0)}`);
+const notGradedText = (m) => `${fmt.int(m.errors)} error${m.errors === 1 ? '' : 's'} · ${fmt.int(m.skipped || 0)} skipped`;
+
 const EVIDENCE = {
   DETERMINISTIC: ['verified', 'badge-verified', 'Verified by code: parsing, schema validation and exact comparison.'],
   AI_JUDGE: ['AI judge', 'badge-ai', 'Relied on an AI judge. Useful, but not ground truth.'],
@@ -58,8 +65,8 @@ function drawLive(el, r) {
       h('div', { class: 'progress' }, h('div', { style: { width: pct * 100 + '%' } })),
       h('div', { class: 'grid grid-4' }, r.models.map((m, i) => h('div', { class: 'kpi' },
         h('div', { class: 'kpi-label row', style: { gap: '6px' } }, h('span', { class: 'swatch', style: { background: seriesColor(i) } }), m.model),
-        h('div', { class: 'kpi-value' }, m.passed + m.failed ? fmt.pct(m.passRate) : '–'),
-        h('div', { class: 'kpi-sub' }, `${m.passed} passed · ${m.failed} failed · ${m.errors} errors`))))),
+        h('div', { class: 'kpi-value' }, graded(m) ? fmt.pct(m.passRate) : NA),
+        h('div', { class: 'kpi-sub' }, `${m.passed} passed · ${m.failed} failed · ${notGradedText(m)}`))))),
     h('div', { class: 'section' }, h('h2', {}, 'Latest results'),
       h('div', { class: 'table-wrap' }, h('table', {}, h('tbody', {}, [...r.results].reverse().map((x) => h('tr', {},
         h('td', {}, verdictBadge(x.evaluation.verdict)),
@@ -81,7 +88,7 @@ function draw(el, report) {
     h('div', { class: 'page-head' },
       h('div', {},
         h('div', { class: 'eyebrow' }, report.demo ? 'Demo report' : 'Reliability report'),
-        h('h1', { class: 'row', style: { gap: '12px' } }, report.suiteName, statusBadge(report.status)),
+        h('h1', { class: 'row', style: { gap: '12px' } }, report.suiteName, statusBadge(report.status, report.models)),
         h('p', {}, `${fmt.date(report.startedAt)}${duration != null ? ` · ${Math.round(duration)} s` : ''} · ${report.settings.targets.length} target(s) · `
           + `${report.settings.repeats} repeat(s) · judge: ${report.settings.judgeModel || 'none'}`)),
       h('div', { class: 'row' },
@@ -89,7 +96,7 @@ function draw(el, report) {
         h('button', { class: 'btn', onclick: () => download(report) }, 'Export JSON'))),
     report.demo ? h('div', { class: 'banner' }, h('span', { class: 'icon' }, '◆'),
       h('div', {}, h('strong', {}, 'Sample data. '), report.message)) : null,
-    !report.demo && report.message ? h('div', { class: 'banner info' }, h('span', { class: 'icon' }, 'i'), h('div', {}, report.message)) : null,
+    !report.demo ? runBanner(report) : null,
   );
 
   const body = h('div');
@@ -136,7 +143,7 @@ function draw(el, report) {
     explorer.append(
       h('h2', {}, 'Test results'),
       h('div', { class: 'filters' },
-        sel('verdict', [['PASS', 'Passed'], ['FAIL', 'Failed'], ['ERROR', 'Errors']], 'All verdicts'),
+        sel('verdict', [['PASS', 'Passed'], ['FAIL', 'Failed'], ['ERROR', 'Errors'], ['SKIPPED', 'Skipped']], 'All verdicts'),
         models.length > 1 ? sel('model', models.map((m) => [m.model, m.model]), 'All models') : null,
         sel('category', categories.map((c) => [c, categoryName(c)]), 'All categories'),
         sel('failure', failures.map((x) => [x, failureLabel(report, x)]), 'All failure types'),
@@ -154,7 +161,7 @@ function draw(el, report) {
           h('td', { class: 'small text-2', style: { maxWidth: '320px' } },
             h('div', { class: 'truncate' }, r.evaluation.verdict === 'PASS' ? '—' : r.evaluation.summary)),
           h('td', {}, evidenceBadge(r.evaluation.verification)),
-          h('td', { class: 'num small muted' }, r.error ? '–' : fmt.ms(r.latencyMs))))))) : h('div', { class: 'card empty' }, 'No results match these filters.'));
+          h('td', { class: 'num small muted' }, r.rawOutput == null ? '–' : fmt.ms(r.latencyMs))))))) : h('div', { class: 'card empty' }, 'No results match these filters.'));
   }
 
   render();
@@ -168,7 +175,8 @@ function combine(models) {
   models.forEach((m) => Object.entries(m.byFailureType || {}).forEach(([k, v]) => { byFailureType[k] = (byFailureType[k] || 0) + v; }));
   const priced = models.some((m) => m.costUsd != null);
   return {
-    model: 'all', total: sum('total'), passed, failed, errors: sum('errors'), passRate: passed + failed ? passed / (passed + failed) : 0,
+    model: 'all', total: sum('total'), passed, failed, errors: sum('errors'), skipped: sum('skipped'),
+    passRate: passed + failed ? passed / (passed + failed) : null,
     verifiedPasses: sum('verifiedPasses'), judgedPasses: sum('judgedPasses'), heuristicPasses: sum('heuristicPasses'),
     byFailureType, inputTokens: sum('inputTokens'), outputTokens: sum('outputTokens'),
     costUsd: priced ? models.reduce((a, m) => a + (m.costUsd || 0), 0) : null,
@@ -177,17 +185,25 @@ function combine(models) {
   };
 }
 
+function passColorOf(rate) {
+  if (rate == null) return STATUS.muted;
+  return rate >= 0.9 ? STATUS.pass : rate >= 0.7 ? STATUS.error : STATUS.fail;
+}
+
 function kpis(m, report) {
-  const passColor = m.passRate >= 0.9 ? STATUS.pass : m.passRate >= 0.7 ? STATUS.error : STATUS.fail;
+  const measured = graded(m) > 0;
+  const passColor = passColorOf(m.passRate);
   return h('div', { class: 'kpis' },
-    kpi('Tests executed', fmt.int(m.total), `${m.errors} error${m.errors === 1 ? '' : 's'} excluded from pass rate`),
+    kpi('Tests executed', fmt.int(m.total), `${fmt.int(graded(m))} graded · ${notGradedText(m)} (not counted)`),
     h('div', { class: 'kpi' }, h('div', { class: 'kpi-label' }, 'Pass rate'),
-      h('div', { class: 'kpi-value', style: { color: passColor } }, fmt.pct(m.passRate)),
-      m.combined ? h('div', { class: 'kpi-sub' }, 'across all models')
-        : [meter(m.passRate, m.passRateLow, m.passRateHigh, passColor),
-          h('div', { class: 'kpi-sub' }, `95% CI ${fmt.pct(m.passRateLow, 0)}–${fmt.pct(m.passRateHigh, 0)}`)]),
-    kpi('Passed / failed', `${m.passed} / ${m.failed}`, `${fmt.pct(m.passed ? m.verifiedPasses / m.passed : 0, 0)} of passes verified by code`),
-    kpi('Latency p50', fmt.ms(m.latency.p50), `p95 ${fmt.ms(m.latency.p95)}`),
+      h('div', { class: 'kpi-value', style: { color: passColor } }, rateText(m.passRate)),
+      !measured ? h('div', { class: 'kpi-sub' }, 'not enough data: no response was graded')
+        : m.combined ? h('div', { class: 'kpi-sub' }, 'across all models')
+          : [meter(m.passRate, m.passRateLow, m.passRateHigh, passColor), h('div', { class: 'kpi-sub' }, ciText(m))]),
+    kpi('Passed / failed', `${m.passed} / ${m.failed}`, m.passed ? `${fmt.pct(m.verifiedPasses / m.passed, 0)} of passes verified by code` : 'no passes to verify'),
+    !(m.combined ? m.latency.p50 : m.latency.max)
+      ? kpi('Latency p50', '–', 'no responses received')
+      : kpi('Latency p50', fmt.ms(m.latency.p50), `p95 ${fmt.ms(m.latency.p95)}`),
     kpi('Estimated cost', fmt.usd(m.costUsd), `${fmt.tokens(m.inputTokens)} in · ${fmt.tokens(m.outputTokens)} out`
       + (report.judge?.costUsd != null && m.combined ? ` · judge ${fmt.usd(report.judge.costUsd)}` : '')),
     m.combined ? null : kpi('Consistency', m.consistency == null ? '–' : fmt.pct(m.consistency, 0),
@@ -205,12 +221,13 @@ function outcomeCard(m) {
     { label: 'Passed: AI judge', value: m.judgedPasses, color: '#5fbf5f' },
     { label: 'Passed: heuristic', value: m.heuristicPasses, color: '#9ad49a' },
     { label: 'Failed', value: m.failed, color: STATUS.fail },
-    { label: 'Error', value: m.errors, color: STATUS.error },
+    { label: 'Error (not graded)', value: m.errors, color: STATUS.error },
+    { label: 'Skipped (not sent)', value: m.skipped || 0, color: STATUS.muted },
   ];
   return h('div', { class: 'card' },
     h('div', { class: 'card-head' }, h('h3', {}, 'Outcomes'), h('span', { class: 'hint' }, 'and the evidence behind each pass')),
     h('div', { class: 'donut-wrap' },
-      donut({ segments, center: fmt.pct(m.passRate, 0), sub: 'pass rate' }),
+      donut({ segments, center: rateText(m.passRate, 0), sub: graded(m) ? 'pass rate' : 'nothing graded' }),
       h('div', { class: 'donut-legend' }, segments.filter((x) => x.value > 0 || x.label === 'Failed').map((x) => h('div', { class: 'legend-item' },
         h('span', { class: 'swatch', style: { background: x.color } }), x.label, h('span', { class: 'val' }, fmt.int(x.value)))))));
 }
@@ -225,8 +242,10 @@ function categoryCard(models, selected, colorOf) {
     values: shown.map((m) => {
       const s = m.byCategory[c];
       if (!s) return { value: 0, text: '–', color: colorOf(m.model) };
-      return { value: s.passRate, text: fmt.pct(s.passRate, 0), color: colorOf(m.model),
-        tip: [`${categoryName(c)} · ${m.model}`, `${s.passed} passed, ${s.failed} failed${s.errors ? `, ${s.errors} errors` : ''}`, `Pass rate ${fmt.pct(s.passRate)}`] };
+      return { value: s.passRate ?? 0, text: rateText(s.passRate, 0), color: colorOf(m.model),
+        tip: [`${categoryName(c)} · ${m.model}`,
+          `${s.passed} passed, ${s.failed} failed${s.errors ? `, ${s.errors} errors` : ''}${s.skipped ? `, ${s.skipped} skipped` : ''}`,
+          s.passRate == null ? 'Pass rate N/A: nothing in this category was graded' : `Pass rate ${fmt.pct(s.passRate)}`] };
     }),
   }));
   return h('div', { class: 'card' },
@@ -241,7 +260,7 @@ function comparison(models, report) {
     return dir > 0 ? Math.max(...vals) : Math.min(...vals);
   };
   const metrics = [
-    ['Pass rate', (m) => m.passRate, (v, m) => `${fmt.pct(v)}  (${fmt.pct(m.passRateLow, 0)}–${fmt.pct(m.passRateHigh, 0)})`, 1],
+    ['Pass rate', (m) => m.passRate, (v, m) => (v == null ? NA : `${fmt.pct(v)}  (${fmt.pct(m.passRateLow, 0)}–${fmt.pct(m.passRateHigh, 0)})`), 1],
     ['Verified passes', (m) => (m.passed ? m.verifiedPasses / m.passed : null), (v) => fmt.pct(v, 0), 1],
     ['Consistency', (m) => m.consistency, (v) => (v == null ? '–' : fmt.pct(v, 0)), 1],
     ['Latency p50', (m) => m.latency.p50, (v) => fmt.ms(v), -1],
@@ -249,6 +268,7 @@ function comparison(models, report) {
     ['Estimated cost', (m) => m.costUsd, (v) => fmt.usd(v), -1],
     ['Cost per passed test', (m) => (m.costUsd != null && m.passed ? m.costUsd / m.passed : null), (v) => (v == null ? 'n/a' : '$' + v.toFixed(5)), -1],
     ['Errors', (m) => m.errors, (v) => fmt.int(v), -1],
+    ['Skipped', (m) => m.skipped || 0, (v) => fmt.int(v), -1],
   ];
   return h('div', { class: 'section' }, h('h2', {}, 'Model comparison'),
     h('p', { class: 'muted small', style: { marginBottom: '10px' } }, 'Identical inputs for every model. Overlapping 95% intervals mean the difference may be noise; add tests or repeats to separate them.'),
@@ -268,7 +288,7 @@ function latencyCard(report, models, selected) {
   const shown = selected === 'all' ? models : models.filter((m) => m.model === selected);
   const series = shown.map((m) => ({
     name: m.model, color: seriesColor(models.indexOf(m)),
-    values: report.results.filter((r) => r.model === m.model && !r.error).map((r) => r.latencyMs),
+    values: report.results.filter((r) => r.model === m.model && r.rawOutput != null).map((r) => r.latencyMs),
   }));
   return h('div', { class: 'card' },
     h('div', { class: 'card-head' }, h('h3', {}, 'Response time distribution'), h('span', { class: 'hint' }, 'responses per latency bucket')),
@@ -284,15 +304,42 @@ function failureTypeCard(m) {
     entries.length ? barRows(entries.map(([type, n]) => ({
       label: failureLabel(null, type),
       values: [{ value: n, max, text: String(n), color: STATUS.fail, tip: [failureLabel(null, type), `${n} failure${n === 1 ? '' : 's'}`] }],
-    }))) : h('div', { class: 'empty' }, 'No failures. 🎉'));
+    }))) : h('div', { class: 'empty' }, noFailuresText(m)));
+}
+
+/** Empty-state text for "no classified failures", which only means success when something was graded. */
+function noFailuresText(m) {
+  if (!graded(m)) return 'Nothing to classify: no response was graded. See Run problems below.';
+  if (m.errors || m.skipped) return `No model failures among ${fmt.int(graded(m))} graded responses, but ${notGradedText(m)} were not graded.`;
+  return 'No failures among the graded responses.';
+}
+
+function runBanner(report) {
+  const outcome = report.analysis?.outcome;
+  if (outcome === 'NOTHING_GRADED') {
+    return h('div', { class: 'banner bad' }, h('span', { class: 'icon' }, '!'),
+      h('div', {}, h('strong', {}, 'No results to evaluate. '), report.message || 'No response could be graded, so no pass rate was measured.'));
+  }
+  if (report.status === 'COMPLETED_WITH_ERRORS' || report.status === 'FAILED') {
+    return h('div', { class: 'banner' }, h('span', { class: 'icon' }, '!'),
+      h('div', {}, h('strong', {}, report.status === 'FAILED' ? 'Run failed. ' : 'Finished with errors. '), report.message || ''));
+  }
+  return report.message ? h('div', { class: 'banner info' }, h('span', { class: 'icon' }, 'i'), h('div', {}, report.message)) : null;
 }
 
 function analysisSection(report, byId, onShow, onOpen) {
   const a = report.analysis;
   if (!a) return h('div');
-  const wrap = h('div', { class: 'section' }, h('h2', {}, 'Failure analysis'));
+  const wrap = h('div', { class: 'section' });
+  if (a.issues?.length) wrap.append(issuesSection(a.issues, byId, onOpen));
+  wrap.append(h('h2', {}, 'Failure analysis'));
   if (!a.clusters.length) {
-    wrap.append(h('div', { class: 'card empty' }, 'Every test passed. Try harder categories or more cases per category.'));
+    const text = {
+      ALL_PASSED: 'Every test passed. Try harder categories or more cases per category.',
+      PASSED_WITH_ISSUES: 'Every graded response passed, but some calls errored or were skipped (see Run problems), so this is not a full pass.',
+      NOTHING_GRADED: 'No model failures to analyse because no response was graded. Fix the run problems above and run again.',
+    }[a.outcome] || 'No failures were classified.';
+    wrap.append(h('div', { class: 'card empty' }, text));
     return wrap;
   }
   if (a.aiInsights) wrap.append(aiPanel(a.aiInsights));
@@ -311,6 +358,25 @@ function analysisSection(report, byId, onShow, onOpen) {
       })),
     h('div', { style: { marginTop: '10px' } }, h('button', { class: 'btn btn-sm', onclick: () => onShow(c.type) }, `Show all ${c.count} →`))))));
   return wrap;
+}
+
+/** Call errors and skipped calls: problems with the run, not evidence about the model. */
+function issuesSection(issues, byId, onOpen) {
+  return h('div', { style: { marginBottom: '24px' } },
+    h('h2', {}, 'Run problems'),
+    h('p', { class: 'muted small', style: { marginBottom: '10px' } }, 'These calls produced nothing to grade, so they are excluded from every pass rate.'),
+    h('div', { class: 'grid grid-2' }, issues.map((g) => h('div', { class: 'cluster' },
+      h('div', { class: 'cluster-head' }, h('span', { class: 'cluster-count ' + (g.skipped ? 'muted-count' : 'warn') }, g.count), h('h3', {}, g.label),
+        h('span', { class: 'spacer' }), h('span', { class: 'badge ' + (g.skipped ? 'badge-skipped' : 'badge-error') }, g.skipped ? 'not sent' : 'call error')),
+      h('p', {}, g.description),
+      Object.keys(g.byModel).length > 1 ? h('div', { class: 'chips', style: { marginTop: '8px' } },
+        Object.entries(g.byModel).map(([k, n]) => h('span', { class: 'badge mono' }, `${k} · ${n}`))) : null,
+      g.firstMessage ? h('pre', { class: 'code small', style: { marginTop: '10px', whiteSpace: 'pre-wrap' } }, g.firstMessage) : null,
+      h('div', { class: 'stack', style: { gap: '6px', marginTop: '10px' } },
+        g.exampleIds.slice(0, 2).map((id) => {
+          const r = byId.get(id);
+          return r ? h('a', { href: 'javascript:void(0)', class: 'small mono truncate', onclick: () => onOpen(id) }, '↳ ' + r.input) : null;
+        }))))));
 }
 
 function aiPanel(ai) {
@@ -348,7 +414,7 @@ function openDrawer(r, report) {
       h('h2', { style: { marginTop: '10px' } }, ev.summary),
       h('div', { class: 'kv', style: { marginTop: '14px' } },
         kv('Model', r.model), kv('Category', categoryName(r.category)), kv('Expected behaviour', behaviorBadge(r.expectedBehavior)),
-        kv('Latency', r.error ? '–' : fmt.ms(r.latencyMs)), kv('Tokens', `${fmt.tokens(r.inputTokens)} in · ${fmt.tokens(r.outputTokens)} out`),
+        kv('Latency', r.rawOutput == null ? '–' : fmt.ms(r.latencyMs)), kv('Tokens', `${fmt.tokens(r.inputTokens)} in · ${fmt.tokens(r.outputTokens)} out`),
         kv('Cost', fmt.usd(r.costUsd)), kv('Stop reason', r.stopReason || '–'), kv('Repeat', String(r.repeat + 1))),
       h('h3', {}, 'Input sent to the model'),
       h('pre', { class: 'code' }, r.input),
@@ -358,7 +424,7 @@ function openDrawer(r, report) {
         h('div', {}, h('h3', {}, r.expectedBehavior === 'MATCH_EXPECTED' ? 'Expected output' : 'Expected pattern'),
           expected ? jsonBlock(expected, diffKeys) : h('pre', { class: 'code' }, r.expectedBehavior === 'REFUSE' ? 'A refusal' : 'A clarifying question')),
         h('div', {}, h('h3', {}, 'Actual output (parsed)'),
-          ev.parsed ? jsonBlock(ev.parsed, diffKeys) : h('pre', { class: 'code' }, r.error ? '— no response —' : '— no JSON found —'))),
+          ev.parsed ? jsonBlock(ev.parsed, diffKeys) : h('pre', { class: 'code' }, ev.verdict === 'SKIPPED' ? '— not sent —' : r.rawOutput == null ? '— no response —' : '— no JSON found —'))),
       ev.differences?.length ? [h('h3', {}, 'Field differences'), h('div', { class: 'checks' }, ev.differences.map((d) => h('div', { class: 'check-item' },
         h('span', { class: 'check-icon fail' }, '≠'), h('div', {}, h('div', { class: 'mono small' }, d.path),
           h('div', { class: 'check-detail' }, describeDiff(d))), h('span', { class: 'badge' }, d.kind.toLowerCase().replace('_', ' ')))))] : null,
@@ -413,7 +479,7 @@ function kv(k, v) {
 }
 
 function verdictBadge(v) {
-  return h('span', { class: 'badge badge-' + v.toLowerCase() }, { PASS: '✓ pass', FAIL: '✕ fail', ERROR: '! error' }[v] || v);
+  return h('span', { class: 'badge badge-' + v.toLowerCase() }, { PASS: '✓ pass', FAIL: '✕ fail', ERROR: '! error', SKIPPED: '– skipped' }[v] || v);
 }
 
 function evidenceBadge(method) {

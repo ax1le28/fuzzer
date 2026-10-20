@@ -7,7 +7,8 @@ import java.util.List;
 /**
  * The outcome of evaluating one response.
  *
- * @param verdict      pass, fail, or error (the call or the evaluation itself failed)
+ * @param verdict      pass or fail (the model was graded), error (the call or the grading failed) or skipped
+ *                     (the call was never sent); only pass and fail count towards a pass rate
  * @param verification the weakest kind of evidence the verdict rests on: a pass that needed an AI judge is
  *                     {@code AI_JUDGE}, never {@code DETERMINISTIC}
  * @param failureType  primary failure classification, null unless failed
@@ -34,7 +35,18 @@ public record Evaluation(
         return new Evaluation(Verdict.ERROR, null, null, summary, List.of(), List.of(), null);
     }
 
-    public enum Verdict { PASS, FAIL, ERROR }
+    public static Evaluation skipped(String summary) {
+        return new Evaluation(Verdict.SKIPPED, null, null, summary, List.of(), List.of(), null);
+    }
+
+    public enum Verdict {
+        PASS, FAIL, ERROR, SKIPPED;
+
+        /** True when the model's behaviour was actually graded. */
+        public boolean graded() {
+            return this == PASS || this == FAIL;
+        }
+    }
 
     /** How a check reached its conclusion. Ordered from strongest to weakest evidence. */
     public enum Method {

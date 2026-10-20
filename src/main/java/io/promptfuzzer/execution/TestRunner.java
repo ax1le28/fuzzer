@@ -10,6 +10,7 @@ import io.promptfuzzer.llm.ChatModel;
 import io.promptfuzzer.llm.ChatRequest;
 import io.promptfuzzer.llm.ChatResponse;
 import io.promptfuzzer.llm.LlmException;
+import io.promptfuzzer.llm.ResilientChatModel;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -93,7 +94,7 @@ public final class TestRunner {
                             }
                             try {
                                 TestResult result = cancelled.get()
-                                        ? skipped(target, test, repeat, "Run cancelled before this test was sent.")
+                                        ? skipped(target, test, repeat, RunIssue.CANCELLED, "Not sent: the run was cancelled.")
                                         : execute(suite, evaluator, target, test, repeat);
                                 results.add(result);
                                 listener.onResult(result, completed.incrementAndGet(), total);
@@ -122,28 +123,37 @@ public final class TestRunner {
         try {
             response = target.complete(new ChatRequest(suite.task().systemPrompt(), test.input(), options.maxOutputTokens()));
         } catch (Budget.BudgetExceededException e) {
-            return skipped(target, test, repeat, "Skipped: " + e.getMessage());
+            RunIssue issue = e.limit() == Budget.Limit.COST ? RunIssue.COST_LIMIT : RunIssue.REQUEST_LIMIT;
+            return skipped(target, test, repeat, issue, "Not sent: " + e.getMessage() + ".");
+        } catch (ResilientChatModel.EndpointUnavailableException e) {
+            return skipped(target, test, repeat, RunIssue.ENDPOINT_UNAVAILABLE, e.getMessage());
+        } catch (LlmException.ConnectionFailedException e) {
+            return failedCall(target, test, repeat, RunIssue.CONNECTION_FAILED, e.getMessage());
         } catch (LlmException e) {
-            return failedCall(target, test, repeat, e.getMessage());
+            return failedCall(target, test, repeat, e.status() == 408 ? RunIssue.TIMEOUT : RunIssue.PROVIDER_ERROR, e.getMessage());
         } catch (RuntimeException e) {
-            return failedCall(target, test, repeat, "Unexpected error: " + e);
+            return failedCall(target, test, repeat, RunIssue.PROVIDER_ERROR, "Unexpected error: " + LlmException.describe(e));
         }
         Evaluation evaluation = evaluator.evaluate(test, response);
         Double cost = target.pricing().map(p -> p.cost(response.inputTokens(), response.outputTokens())).orElse(null);
+        boolean inconclusive = evaluation.verdict() == Evaluation.Verdict.ERROR;
         return new TestResult(resultId(target, test, repeat), test.id(), target.id(), repeat, test.category(),
                 test.input(), test.expectedBehavior(), test.expectedOutput(), test.expectationSource(),
                 response.text(), evaluation, response.latencyMs(), response.inputTokens(), response.outputTokens(),
-                cost, response.stopReason(), null);
+                cost, response.stopReason(), inconclusive ? evaluation.summary() : null,
+                inconclusive ? RunIssue.EVALUATION_ERROR : null);
     }
 
-    private static TestResult failedCall(ChatModel target, TestCase test, int repeat, String message) {
+    private static TestResult failedCall(ChatModel target, TestCase test, int repeat, RunIssue issue, String message) {
         return new TestResult(resultId(target, test, repeat), test.id(), target.id(), repeat, test.category(),
                 test.input(), test.expectedBehavior(), test.expectedOutput(), test.expectationSource(),
-                null, Evaluation.error("Call failed: " + message), 0, 0, 0, null, null, message);
+                null, Evaluation.error("Call failed: " + message), 0, 0, 0, null, null, message, issue);
     }
 
-    private static TestResult skipped(ChatModel target, TestCase test, int repeat, String message) {
-        return failedCall(target, test, repeat, message);
+    private static TestResult skipped(ChatModel target, TestCase test, int repeat, RunIssue issue, String message) {
+        return new TestResult(resultId(target, test, repeat), test.id(), target.id(), repeat, test.category(),
+                test.input(), test.expectedBehavior(), test.expectedOutput(), test.expectationSource(),
+                null, Evaluation.skipped(message), 0, 0, 0, null, null, message, issue);
     }
 
     private static String resultId(ChatModel target, TestCase test, int repeat) {

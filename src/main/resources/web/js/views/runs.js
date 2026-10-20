@@ -20,11 +20,11 @@ export async function renderRuns(el) {
     h('tbody', {}, runs.map((r) => h('tr', { class: 'clickable', onclick: () => navigate('report/' + r.id) },
       h('td', { class: 'muted' }, fmt.date(r.startedAt)),
       h('td', {}, r.suiteName),
-      h('td', {}, statusBadge(r.status)),
+      h('td', {}, statusBadge(r.status, r.models)),
       h('td', {}, h('div', { class: 'stack', style: { gap: '4px' } }, (r.models || []).map((m) => h('div', { class: 'row', style: { gap: '8px' } },
         h('span', { class: 'mono small' }, m.model),
-        h('span', { style: { color: m.passRate >= 0.9 ? STATUS.pass : m.passRate >= 0.7 ? STATUS.error : STATUS.fail, fontWeight: 600 } },
-          m.passed + m.failed ? fmt.pct(m.passRate) : '–'))))),
+        h('span', { style: { color: m.passRate == null ? STATUS.muted : m.passRate >= 0.9 ? STATUS.pass : m.passRate >= 0.7 ? STATUS.error : STATUS.fail, fontWeight: 600 } },
+          m.passed + m.failed ? fmt.pct(m.passRate) : 'N/A'))))),
       h('td', { class: 'num' }, `${r.completed}/${r.total}`),
       h('td', {}, r.status === 'RUNNING' ? null : h('button', { class: 'btn btn-ghost btn-sm', title: 'Delete report', onclick: async (e) => {
         e.stopPropagation();
@@ -33,7 +33,14 @@ export async function renderRuns(el) {
       } }, '✕'))))))));
 }
 
-export function statusBadge(status) {
-  const cls = { COMPLETED: 'badge-pass', RUNNING: 'badge-verified pulse', CANCELLED: 'badge-error', FAILED: 'badge-fail' }[status] || '';
-  return h('span', { class: 'badge ' + cls }, status.toLowerCase());
+/**
+ * How the run ended, which is not the same as how the model did: "completed" only when every call was graded.
+ * A finished run in which nothing could be graded is shown as such, never as completed.
+ */
+export function statusBadge(status, models) {
+  const nothingGraded = status === 'COMPLETED_WITH_ERRORS' && models?.length && models.every((m) => !(m.passed + m.failed));
+  if (nothingGraded) return h('span', { class: 'badge badge-fail' }, 'no gradable results');
+  const cls = { COMPLETED: 'badge-pass', COMPLETED_WITH_ERRORS: 'badge-error', RUNNING: 'badge-verified pulse', CANCELLED: 'badge-error', FAILED: 'badge-fail' }[status] || '';
+  const label = { COMPLETED_WITH_ERRORS: 'completed with errors' }[status] || status.toLowerCase();
+  return h('span', { class: 'badge ' + cls }, label);
 }

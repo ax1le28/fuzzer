@@ -82,7 +82,8 @@ public final class AnthropicChatModel implements ChatModel {
             throw new LlmException("Anthropic API error " + e.statusCode() + ": " + e.getMessage(),
                     e.statusCode(), isRetryable(e.statusCode()), retryAfter, e);
         } catch (AnthropicIoException e) {
-            throw new LlmException("Network error calling Anthropic: " + e.getMessage(), 0, true, null, e);
+            throw new LlmException("Network error calling Anthropic (" + LlmException.describe(e) + "). "
+                    + LlmException.connectionHint("https://api.anthropic.com"), 0, true, null, e);
         }
     }
 

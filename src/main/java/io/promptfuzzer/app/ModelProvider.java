@@ -2,6 +2,7 @@ package io.promptfuzzer.app;
 
 import io.promptfuzzer.llm.Budget;
 import io.promptfuzzer.llm.ChatModel;
+import io.promptfuzzer.llm.LocalServerCheck;
 import io.promptfuzzer.llm.ModelConfig;
 import io.promptfuzzer.llm.ModelFactory;
 import io.promptfuzzer.llm.ProviderPreset;
@@ -38,6 +39,18 @@ public final class ModelProvider {
                 .filter(r -> r > 0).map(r -> Math.min(r, requestsPerMinute)).orElse(requestsPerMinute);
         RateLimiter limiter = limiters.computeIfAbsent(key, k -> new RateLimiter(rpm));
         return new ResilientChatModel(raw, limiter, budget, ResilientChatModel.RetryPolicy.DEFAULT);
+    }
+
+    /**
+     * Fails fast, before any test data is sent, when a local server is down or lacks the chosen model.
+     * Hosted providers are not probed; their errors surface on the first call.
+     *
+     * @throws IllegalArgumentException with an explanation and the fix
+     */
+    public void preflight(ModelConfig config) {
+        LocalServerCheck.problem(config).ifPresent(problem -> {
+            throw new IllegalArgumentException(problem);
+        });
     }
 
     /** The unwrapped model, used only to read its id and pricing. */

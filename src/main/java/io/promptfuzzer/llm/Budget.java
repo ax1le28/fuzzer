@@ -1,5 +1,6 @@
 package io.promptfuzzer.llm;
 
+import java.util.Locale;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -30,16 +31,26 @@ public final class Budget {
         return new Budget(Integer.MAX_VALUE, Double.MAX_VALUE);
     }
 
+    /**
+     * The request ceiling for an operation that plans {@code plannedCalls} calls, each of which the retry policy
+     * may attempt up to {@code maxAttempts} times. Every attempt is a real request, so the ceiling covers the
+     * worst case; {@code hardLimit} ({@code PF_MAX_REQUESTS}) still wins, so it stays a true upper bound.
+     */
+    public static int requestCeiling(int plannedCalls, int maxAttempts, int hardLimit) {
+        long worstCase = (long) Math.max(1, plannedCalls) * Math.max(1, maxAttempts);
+        return (int) Math.min(hardLimit, worstCase);
+    }
+
     /** Reserves one request. */
     public void acquire() {
         if (spentUsd() >= maxCostUsd) {
-            throw new BudgetExceededException(String.format(
+            throw new BudgetExceededException(Limit.COST, String.format(Locale.ROOT,
                     "Cost limit of $%.2f reached (spent $%.4f)", maxCostUsd, spentUsd()));
         }
         int n = requests.incrementAndGet();
         if (n > maxRequests) {
             requests.decrementAndGet();
-            throw new BudgetExceededException("Request limit of " + maxRequests + " reached");
+            throw new BudgetExceededException(Limit.REQUESTS, "Request limit of " + maxRequests + " reached");
         }
     }
 
@@ -66,9 +77,19 @@ public final class Budget {
         return maxCostUsd;
     }
 
+    /** Which ceiling stopped a call. */
+    public enum Limit { REQUESTS, COST }
+
     public static final class BudgetExceededException extends LlmException {
-        public BudgetExceededException(String message) {
+        private final Limit limit;
+
+        public BudgetExceededException(Limit limit, String message) {
             super(message, 0, false, null, null);
+            this.limit = limit;
+        }
+
+        public Limit limit() {
+            return limit;
         }
     }
 }

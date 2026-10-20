@@ -25,6 +25,7 @@ import io.promptfuzzer.llm.ChatModel;
 import io.promptfuzzer.llm.ModelConfig;
 import io.promptfuzzer.llm.ModelFactory;
 import io.promptfuzzer.llm.ProviderPreset;
+import io.promptfuzzer.llm.ResilientChatModel;
 import io.promptfuzzer.web.WebServer;
 
 import java.io.IOException;
@@ -157,8 +158,11 @@ public final class Cli {
         AiTestGenerator generator = null;
         if (perCategory > 0) {
             ModelProvider provider = new ModelProvider(new ModelFactory(env), config.requestsPerMinute());
-            Budget budget = new Budget(categories.size() * 4, config.maxCostUsd());
-            generator = new AiTestGenerator(provider.create(modelConfig(opts.getOrDefault("model", config.defaultModel())), budget));
+            ModelConfig generatorConfig = modelConfig(opts.getOrDefault("model", config.defaultModel()));
+            provider.preflight(generatorConfig);
+            Budget budget = new Budget(Budget.requestCeiling(categories.size(),
+                    ResilientChatModel.RetryPolicy.DEFAULT.maxAttempts(), config.maxRequests()), config.maxCostUsd());
+            generator = new AiTestGenerator(provider.create(generatorConfig, budget));
         }
         TestSuite suite = new SuiteBuilder(generator, config.maxTests()).build(task,
                 new SuiteBuilder.Options(categories, perCategory, true, Long.parseLong(opts.getOrDefault("seed", "42"))));
@@ -181,10 +185,17 @@ public final class Cli {
         if (planned > config.maxRequests()) {
             throw new IllegalArgumentException(planned + " calls planned; limit is " + config.maxRequests() + " (PF_MAX_REQUESTS)");
         }
-        Budget budget = new Budget(Math.min(config.maxRequests(), planned * 3 + 4), maxCost);
+        ModelConfig judgeConfig = opts.containsKey("judge") ? modelConfig(opts.get("judge")) : null;
+        int judgeCalls = judgeConfig == null ? 0 : planned;
+        Budget budget = new Budget(Budget.requestCeiling(planned + judgeCalls,
+                ResilientChatModel.RetryPolicy.DEFAULT.maxAttempts(), config.maxRequests()), maxCost);
         ModelProvider provider = new ModelProvider(new ModelFactory(env), config.requestsPerMinute());
+        targetConfigs.forEach(provider::preflight);
+        if (judgeConfig != null) {
+            provider.preflight(judgeConfig);
+        }
         List<ChatModel> targets = targetConfigs.stream().map(c -> provider.create(c, budget)).toList();
-        AiJudge judge = opts.containsKey("judge") ? new AiJudge(provider.create(modelConfig(opts.get("judge")), budget)) : null;
+        AiJudge judge = judgeConfig == null ? null : new AiJudge(provider.create(judgeConfig, budget));
 
         out.printf("Running %d tests × %d model(s) × %d repeat(s) = %d calls (budget $%.2f)%n",
                 suite.cases().size(), targets.size(), repeats, planned, maxCost);
@@ -201,19 +212,29 @@ public final class Cli {
         FailureAnalysis analysis = ReportBuilder.analyze(results);
         printSummary(summaries, analysis);
         out.printf("Spent ≈ $%.4f in %d requests%n", budget.spentUsd(), budget.requestsUsed());
+        RunReport.RunSettings settings = new RunReport.RunSettings(ids, repeats, concurrency, 4096,
+                judge == null ? null : judge.modelId(), maxCost, budget.maxRequests());
+        String issues = ReportBuilder.issueSummary(results, settings, budget.spentUsd());
+        if (issues != null) {
+            err.println("WARNING: " + issues);
+        }
 
         if (opts.containsKey("out")) {
-            RunReport.RunSettings settings = new RunReport.RunSettings(ids, repeats, concurrency, 4096,
-                    judge == null ? null : judge.modelId(), maxCost, budget.maxRequests());
-            RunReport report = new RunReport(Ids.timestamped("run"), suite.id(), suite.name(), RunReport.Status.COMPLETED,
+            RunReport report = new RunReport(Ids.timestamped("run"), suite.id(), suite.name(),
+                    ReportBuilder.completionStatus(results, false),
                     started, Instant.now(), settings, results.size(), results.size(), summaries, results, analysis,
                     judge == null ? null : new RunReport.JudgeUsage(judge.modelId(), judge.calls(), judge.inputTokens(),
-                            judge.outputTokens(), judge.costUsd()), suite, null, false);
+                            judge.outputTokens(), judge.costUsd()), suite, issues, false);
             write(Path.of(opts.get("out")), Json.pretty(report));
             out.println("Report written to " + opts.get("out"));
         }
         if (opts.containsKey("min-pass-rate")) {
             double min = Double.parseDouble(opts.get("min-pass-rate"));
+            List<String> unmeasured = summaries.stream().filter(s -> s.passRate() == null).map(ModelSummary::model).toList();
+            if (!unmeasured.isEmpty()) {
+                err.printf("FAILED: no gradable responses, so no pass rate was measured for %s%n", String.join(", ", unmeasured));
+                return 1;
+            }
             List<String> below = summaries.stream().filter(s -> s.passRate() < min).map(ModelSummary::model).toList();
             if (!below.isEmpty()) {
                 err.printf("FAILED: pass rate below %.0f%% for %s%n", min * 100, String.join(", ", below));
@@ -236,10 +257,11 @@ public final class Cli {
 
     private void printSummary(List<ModelSummary> summaries, FailureAnalysis analysis) {
         out.println();
-        out.printf("%-28s %7s %7s %7s %10s %9s %10s%n", "MODEL", "PASS", "FAIL", "ERROR", "PASS RATE", "P50 ms", "COST $");
+        out.printf("%-28s %7s %7s %7s %7s %10s %9s %10s%n", "MODEL", "PASS", "FAIL", "ERROR", "SKIPPED", "PASS RATE", "P50 ms", "COST $");
         for (ModelSummary s : summaries) {
-            out.printf("%-28s %7d %7d %7d %9.1f%% %9d %10s%n", truncate(s.model(), 28), s.passed(), s.failed(), s.errors(),
-                    s.passRate() * 100, s.latency().p50(), s.costUsd() == null ? "n/a" : String.format(Locale.ROOT, "%.4f", s.costUsd()));
+            out.printf("%-28s %7d %7d %7d %7d %10s %9d %10s%n", truncate(s.model(), 28), s.passed(), s.failed(), s.errors(),
+                    s.skipped(), s.passRate() == null ? "N/A" : String.format(Locale.ROOT, "%.1f%%", s.passRate() * 100),
+                    s.latency().p50(), s.costUsd() == null ? "n/a" : String.format(Locale.ROOT, "%.4f", s.costUsd()));
         }
         if (!analysis.clusters().isEmpty()) {
             out.println();

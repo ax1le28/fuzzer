@@ -30,7 +30,12 @@ public record RunReport(
         String message,
         boolean demo) {
 
-    public enum Status { RUNNING, COMPLETED, CANCELLED, FAILED }
+    /**
+     * How the run itself ended, independent of how the model did. {@code COMPLETED_WITH_ERRORS} means it finished
+     * but some calls errored or were skipped; the analysis outcome says whether anything was graded at all.
+     * {@code FAILED} means the run crashed.
+     */
+    public enum Status { RUNNING, COMPLETED, COMPLETED_WITH_ERRORS, CANCELLED, FAILED }
 
     /**
      * @param targets       target ids in the order they were run

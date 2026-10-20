@@ -143,6 +143,7 @@ input[type=checkbox] { accent-color: var(--accent); width: 15px; height: 15px; }
 }
 .badge-pass { color: var(--good-text); border-color: rgba(12, 163, 12, 0.5); background: rgba(12, 163, 12, 0.1); }
 .badge-fail { color: var(--bad-text); border-color: rgba(208, 59, 59, 0.55); background: rgba(208, 59, 59, 0.1); }
+.badge-skipped { color: var(--muted); border-color: rgba(137, 135, 129, 0.5); background: rgba(137, 135, 129, 0.08); }
 .badge-error { color: var(--warn); border-color: rgba(250, 178, 25, 0.5); background: rgba(250, 178, 25, 0.08); }
 .badge-ai { color: #b8b0f5; border-color: rgba(144, 133, 233, 0.5); background: var(--ai-soft); }
 .badge-verified { color: #8fc0f5; border-color: rgba(57, 135, 229, 0.5); background: var(--accent-soft); }
@@ -156,6 +157,8 @@ input[type=checkbox] { accent-color: var(--accent); width: 15px; height: 15px; }
 .banner .icon { color: var(--warn); font-weight: 700; }
 .banner.info { border-color: rgba(57, 135, 229, 0.4); background: var(--accent-soft); }
 .banner.info .icon { color: var(--accent); }
+.banner.bad { border-color: rgba(208, 59, 59, 0.55); background: rgba(208, 59, 59, 0.1); }
+.banner.bad .icon { color: var(--bad-text); }
 
 /* Tables */
 .table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
@@ -214,6 +217,8 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .cluster { border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; background: var(--surface); }
 .cluster-head { display: flex; align-items: baseline; gap: 10px; }
 .cluster-count { font-size: 22px; font-weight: 650; }
+.cluster-count.warn { color: var(--warn); }
+.cluster-count.muted-count { color: var(--muted); }
 .cluster p { color: var(--text-2); margin-top: 4px; font-size: 13px; }
 .suggestion { margin-top: 10px; padding: 10px 12px; border-radius: 8px; background: var(--surface-2); font-size: 13px; color: var(--text-2); }
 .suggestion strong { color: var(--text); font-weight: 600; }

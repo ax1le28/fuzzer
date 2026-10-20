@@ -30,7 +30,18 @@ silently in production. The engine is task-agnostic: anything with a system prom
   tagged fences before they reach the generator, judge or analyst, and the fence cannot be closed from inside.
 - **Cost and rate safeguards.** A per-run budget (requests and dollars) is checked before every call, requests
   are rate-limited per provider, and 408/409/429/5xx are retried with jittered exponential backoff that honors
-  `retry-after`. The dashboard shows a typical and worst-case estimate before a run starts.
+  `retry-after`. Every attempt counts as a request, and the per-run request ceiling is sized for the retry
+  policy, with `PF_MAX_REQUESTS` as the hard limit. The dashboard shows a typical and worst-case estimate before
+  a run starts.
+- **Run problems are not model failures.** Every result is `PASS`, `FAIL` (graded), `ERROR` (the call or the
+  grading failed) or `SKIPPED` (never sent: request limit, cost limit, unreachable endpoint, cancellation), and
+  each error or skip records its cause. Only graded results enter a pass rate. When nothing was graded the pass
+  rate and its interval are shown as N/A, not 0%, and a run with errors or skipped calls finishes as
+  "completed with errors" (or "no gradable results"), never as a plain success.
+- **Fail fast on unreachable servers.** Before a run or generation, local OpenAI-compatible servers such as
+  Ollama are asked for their model list (`GET /models`, no prompt or test data), so a stopped server or a model
+  that has not been pulled is reported in seconds with the fix. Refused connections are not retried, and after
+  three in a row the endpoint is no longer called for the rest of the run.
 
 ## Quick start
 
@@ -89,7 +100,7 @@ Notes:
 The equivalent manual steps:
 
 ```sh
-./mvnw package          # builds target/promptfuzzer.jar and runs the 77 tests
+./mvnw package          # builds target/promptfuzzer.jar and runs the 90 tests
 java -jar target/promptfuzzer.jar
 ```
 
@@ -188,13 +199,17 @@ results.
 
 ## Testing
 
-`./mvnw verify` runs 77 tests: evaluator, JSON tools, safeguards (budget, rate limiter, retry and backoff,
+`./mvnw verify` runs 90 tests: evaluator, JSON tools, safeguards (budget, rate limiter, retry and backoff,
 retry-after parsing, key-variable allowlist), generation, report statistics, the CLI, and an end-to-end test that
 drives the whole HTTP API against a local OpenAI-compatible mock server. The mock returns a deliberately naive
 "model" that ignores negation and wraps some answers in code fences, plus an injected 429, and the test asserts
 the run retries the 429 and produces the expected `NEGATION_MISUNDERSTANDING` and `FORMATTING` clusters. A second
 end-to-end test runs `generate` and `run` from the CLI with no API key at all against a keyless local server,
-and checks that no Authorization header is ever sent.
+and checks that no Authorization header is ever sent. Run-outcome tests cover runs made only of connection errors,
+only of request-limit skips, and a mix of all four verdicts; an unreachable loopback port (a real refused
+connection, no Ollama needed) that must end the run in seconds; the dollar limit capping spend independently of
+the request ceiling; the pre-run model check against a stub model list; and reports saved by earlier versions,
+which are reclassified when opened.
 
 ## Limitations
 

@@ -11,7 +11,9 @@ import io.promptfuzzer.execution.TestResult;
 import io.promptfuzzer.execution.TestRunner;
 import io.promptfuzzer.llm.Budget;
 import io.promptfuzzer.llm.ChatModel;
+import io.promptfuzzer.llm.LlmException;
 import io.promptfuzzer.llm.ModelConfig;
+import io.promptfuzzer.llm.ResilientChatModel;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -84,13 +86,22 @@ public final class RunService {
         if (cap <= 0) {
             throw new IllegalArgumentException("Budget must be positive");
         }
-        int judgeHeadroom = request.judge() == null ? 0 : planned + 1;
-        int requestCap = Math.min(config.maxRequests(), planned * 2 + judgeHeadroom + 4);
         if (planned > config.maxRequests()) {
             throw new IllegalArgumentException(planned + " calls planned, more than the limit of " + config.maxRequests()
                     + ". Reduce repeats, targets or suite size, or raise PF_MAX_REQUESTS.");
         }
+        // Up to one judge call per result plus the AI analyst; every retry is a request too. PF_MAX_REQUESTS stays
+        // the hard ceiling, but no smaller internal cap can cut a run short.
+        int judgeCalls = request.judge() == null ? 0 : planned + 1;
+        int requestCap = Budget.requestCeiling(planned + judgeCalls,
+                ResilientChatModel.RetryPolicy.DEFAULT.maxAttempts(), config.maxRequests());
         Budget budget = new Budget(requestCap, cap);
+
+        // Fail in seconds, before anything is sent, if a local server is down or lacks the model.
+        request.targets().forEach(models::preflight);
+        if (request.judge() != null) {
+            models.preflight(request.judge());
+        }
 
         List<ChatModel> targets = new ArrayList<>();
         Set<String> ids = new HashSet<>();
@@ -127,23 +138,14 @@ public final class RunService {
                 analysis = analysis.withAiInsights(new AiFailureAnalyst(
                         models.create(run.judgeConfig, run.budget)).analyze(run.suite.task(), analysis, results));
             }
-            run.finish(results, analysis, run.cancelled.get() ? RunReport.Status.CANCELLED : RunReport.Status.COMPLETED,
-                    budgetMessage(run));
+            run.finish(results, analysis, ReportBuilder.completionStatus(results, run.cancelled.get()),
+                    ReportBuilder.issueSummary(results, run.settings, run.budget.spentUsd()));
         } catch (RuntimeException e) {
             run.finish(new ArrayList<>(run.results), ReportBuilder.analyze(new ArrayList<>(run.results)),
-                    RunReport.Status.FAILED, "Run failed: " + e.getMessage());
+                    RunReport.Status.FAILED, "Run failed: " + LlmException.describe(e));
         }
         runs.save(run.id, run.snapshot(true));
         live.remove(run.id);
-    }
-
-    private static String budgetMessage(LiveRun run) {
-        long skipped = run.results.stream().filter(r -> r.error() != null && r.error().startsWith("Skipped")).count();
-        if (skipped > 0) {
-            return skipped + " call(s) skipped because the budget was reached ($"
-                    + String.format("%.4f", run.budget.spentUsd()) + " of $" + run.settings.maxCostUsd() + ").";
-        }
-        return null;
     }
 
     public Optional<RunReport> get(String id, boolean includeResults) {
@@ -151,13 +153,13 @@ public final class RunService {
         if (run != null) {
             return Optional.of(run.snapshot(includeResults));
         }
-        return runs.load(id);
+        return runs.load(id).map(ReportBuilder::upgradeLegacy);
     }
 
     public List<RunReport> list() {
         List<RunReport> out = new ArrayList<>();
         live.values().forEach(r -> out.add(r.snapshot(false)));
-        runs.list().forEach(r -> out.add(withoutDetails(r)));
+        runs.list().forEach(r -> out.add(withoutDetails(ReportBuilder.upgradeLegacy(r))));
         return out;
     }
 
