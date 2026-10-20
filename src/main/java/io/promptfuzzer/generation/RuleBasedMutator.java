@@ -53,7 +53,7 @@ public final class RuleBasedMutator {
             out.add(rule("rule-typo-" + i, TestCategory.TYPOS, injectTypos(input, random, 0.12), example, i,
                     "Keyboard-neighbour substitutions, dropped and swapped letters (seeded)."));
             out.add(rule("rule-casual-" + i, TestCategory.TYPOS, flatten(input), example, i,
-                    "Lower-cased with punctuation stripped, as typed quickly on a phone."));
+                    "Telegraphic: lower-cased, no punctuation or articles, as typed quickly on a phone."));
             out.add(rule("rule-context-" + i, TestCategory.IRRELEVANT_CONTEXT, addNoise(input, random), example, i,
                     "Request surrounded by unrelated chatter."));
         }
@@ -105,7 +105,7 @@ public final class RuleBasedMutator {
                 }
             }
         }
-        if (applied == 0) {
+        if (applied == 0 || sb.toString().equals(input)) {
             // Guarantee at least one perturbation so the test never duplicates the baseline.
             for (int j = input.length() / 2; j < input.length(); j++) {
                 if (Character.isLetter(input.charAt(j)) && !protect[j]) {
@@ -142,6 +142,7 @@ public final class RuleBasedMutator {
         return input.toLowerCase(Locale.ROOT)
                 .replaceAll("[\\p{Punct}&&[^:%°.\\-]]", "")
                 .replaceAll("\\.(?!\\d)", "")
+                .replaceAll("\\b(the|a|an|please)\\b", "")
                 .replaceAll("\\s+", " ")
                 .strip();
     }

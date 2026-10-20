@@ -67,7 +67,6 @@ public final class ReportBuilder {
                 .forEach(t -> byFailure.merge(t, 1, Integer::sum));
 
         List<Long> latencies = results.stream()
-                .filter(r -> r.verdict() != Evaluation.Verdict.ERROR || r.latencyMs() > 0)
                 .filter(r -> r.error() == null)
                 .map(TestResult::latencyMs).sorted().toList();
         ModelSummary.Latency latency = latencies.isEmpty() ? new ModelSummary.Latency(0, 0, 0, 0)
@@ -93,7 +92,7 @@ public final class ReportBuilder {
     static Double consistency(List<TestResult> results) {
         Map<String, List<TestResult>> byTest = results.stream()
                 .filter(r -> r.verdict() != Evaluation.Verdict.ERROR)
-                .collect(Collectors.groupingBy(TestResult::testId, LinkedHashMap::new, Collectors.toList()));
+                .collect(Collectors.groupingBy(r -> r.model() + "\u0000" + r.testId(), LinkedHashMap::new, Collectors.toList()));
         int eligible = 0;
         int consistent = 0;
         for (List<TestResult> group : byTest.values()) {
