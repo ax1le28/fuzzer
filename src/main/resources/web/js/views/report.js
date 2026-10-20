@@ -95,7 +95,7 @@ function draw(el, report) {
         report.demo ? null : h('a', { class: 'btn', href: `#/run?suite=${report.suiteId}` }, 'Run again'),
         h('button', { class: 'btn', onclick: () => download(report) }, 'Export JSON'))),
     report.demo ? h('div', { class: 'banner' }, h('span', { class: 'icon' }, '◆'),
-      h('div', {}, h('strong', {}, 'Sample data. '), report.message)) : null,
+      h('div', {}, h('strong', {}, 'Sample data. '), (report.message || '').replace(/^Sample data:\s*/i, ''))) : null,
     !report.demo ? runBanner(report) : null,
   );
 
