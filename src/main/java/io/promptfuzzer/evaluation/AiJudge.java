@@ -78,7 +78,7 @@ public final class AiJudge implements Judge {
 
         ChatResponse response;
         try {
-            response = model.complete(new ChatRequest(system, user, 2048));
+            response = model.complete(new ChatRequest(system, user, 4096));
         } catch (LlmException e) {
             throw new JudgeException("Judge call failed: " + e.getMessage(), e);
         }

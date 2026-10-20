@@ -24,6 +24,7 @@ import io.promptfuzzer.llm.Budget;
 import io.promptfuzzer.llm.ChatModel;
 import io.promptfuzzer.llm.ModelConfig;
 import io.promptfuzzer.llm.ModelFactory;
+import io.promptfuzzer.llm.ProviderPreset;
 import io.promptfuzzer.web.WebServer;
 
 import java.io.IOException;
@@ -54,7 +55,7 @@ public final class Cli {
             Usage:
               promptfuzzer [serve]                       Start the dashboard on http://127.0.0.1:7070
               promptfuzzer generate --task FILE --out FILE [options]
-                  --model ID           generator model (default: PF_DEFAULT_MODEL or claude-opus-5-5)
+                  --model ID           generator model (default: PF_DEFAULT_MODEL, else the first provider with a key)
                   --categories LIST    comma-separated, e.g. PARAPHRASE,NEGATION,AMBIGUITY (default: all)
                   --per-category N     AI cases per category (default 4; 0 = rule-based only)
                   --seed N             seed for rule-based mutations (default 42)
@@ -67,8 +68,12 @@ public final class Cli {
                   --out FILE           write the full JSON report
               promptfuzzer demo [--out FILE]              Print the bundled sample report summary
 
-            Models are Anthropic model ids unless prefixed: "openai:<model>@<base-url>" for any
-            OpenAI-compatible server. API keys are read from ANTHROPIC_API_KEY / OPENAI_API_KEY.
+            Models are Anthropic model ids unless prefixed with a provider:
+              gemini:gemini-2.5-flash           Google Gemini free tier   (key: GEMINI_API_KEY)
+              groq:llama-3.3-70b-versatile      Groq free tier            (key: GROQ_API_KEY)
+              ollama:qwen2.5:7b                 local Ollama              (no key)
+              openai:<model>@<base-url>[#KEY_ENV|#none]   any OpenAI-compatible server (key: OPENAI_API_KEY)
+            Anthropic models read ANTHROPIC_API_KEY. Keys are only ever read from environment variables.
             """;
 
     private final Function<String, String> env;
@@ -126,7 +131,11 @@ public final class Cli {
                 new RunService(config, provider, suites, runs)).start();
         out.println();
         out.println("  PromptFuzzer is running at http://" + displayHost(config.host()) + ":" + config.port());
-        out.println("  Anthropic key: " + (factory.hasKey(ModelConfig.Provider.ANTHROPIC) ? "found" : "not set (demo mode only)"));
+        List<String> keys = Arrays.stream(ProviderPreset.values())
+                .filter(p -> p.keyEnv() != null && p.provider() != ModelConfig.Provider.ENDPOINT && factory.hasKey(p.keyEnv()))
+                .map(ProviderPreset::label).toList();
+        out.println("  API keys found: " + (keys.isEmpty() ? "none (demo, rule-based tests and local Ollama still work)" : String.join(", ", keys)));
+        out.println("  Default model: " + config.defaultModel());
         out.println("  Per-run budget ceiling: $" + config.maxCostUsd() + ", data in " + config.dataDir().toAbsolutePath());
         out.println();
         try {
@@ -244,14 +253,7 @@ public final class Cli {
 
     /** {@code claude-x}, or {@code openai:model@http://host/v1} for OpenAI-compatible servers. */
     static ModelConfig modelConfig(String spec) {
-        if (spec.startsWith("openai:")) {
-            String rest = spec.substring("openai:".length());
-            int at = rest.indexOf('@');
-            String model = at < 0 ? rest : rest.substring(0, at);
-            String base = at < 0 ? "https://api.openai.com/v1" : rest.substring(at + 1);
-            return new ModelConfig(ModelConfig.Provider.OPENAI_COMPATIBLE, model, base, null, null, null, null, null, null);
-        }
-        return ModelConfig.anthropic(spec);
+        return ProviderPreset.parseSpec(spec);
     }
 
     static Set<TestCategory> parseCategories(String list) {

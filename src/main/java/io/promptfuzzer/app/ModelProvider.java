@@ -4,6 +4,7 @@ import io.promptfuzzer.llm.Budget;
 import io.promptfuzzer.llm.ChatModel;
 import io.promptfuzzer.llm.ModelConfig;
 import io.promptfuzzer.llm.ModelFactory;
+import io.promptfuzzer.llm.ProviderPreset;
 import io.promptfuzzer.llm.RateLimiter;
 import io.promptfuzzer.llm.ResilientChatModel;
 
@@ -33,7 +34,9 @@ public final class ModelProvider {
     public ChatModel create(ModelConfig config, Budget budget) {
         ChatModel raw = factory.create(config);
         String key = config.provider() + "|" + (config.baseUrl() == null ? "" : config.baseUrl());
-        RateLimiter limiter = limiters.computeIfAbsent(key, k -> new RateLimiter(requestsPerMinute));
+        int rpm = ProviderPreset.forBaseUrl(config.baseUrl()).map(ProviderPreset::requestsPerMinute)
+                .filter(r -> r > 0).map(r -> Math.min(r, requestsPerMinute)).orElse(requestsPerMinute);
+        RateLimiter limiter = limiters.computeIfAbsent(key, k -> new RateLimiter(rpm));
         return new ResilientChatModel(raw, limiter, budget, ResilientChatModel.RetryPolicy.DEFAULT);
     }
 

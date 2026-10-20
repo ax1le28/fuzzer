@@ -37,16 +37,59 @@ silently in production. The engine is task-agnostic: anything with a system prom
 Requirements: **Java 21+**. Maven is not needed; the wrapper downloads it.
 
 ```sh
-export ANTHROPIC_API_KEY=sk-ant-...   # optional: the demo and rule-based tests work without it
-./run.sh                              # Windows: run.cmd
+export GEMINI_API_KEY=...   # free, see below; or ANTHROPIC_API_KEY / GROQ_API_KEY; or none for Ollama
+./run.sh                    # Windows: run.cmd
 ```
 
-Open <http://127.0.0.1:7070>. Without a key, choose **Open demo report** to explore a full sample report.
+Open <http://127.0.0.1:7070>. Without any key, choose **Open demo report** to explore a full sample report, or
+use a local Ollama model.
+
+### Free and local models
+
+You do not need a paid API. PromptFuzzer picks the first provider whose key is set (Anthropic, then Gemini, then
+Groq) as the default generator, judge and target, and every provider can be chosen per model in the dashboard.
+
+| Option | Cost | Setup | Model spec |
+|---|---|---|---|
+| **Google Gemini** | Free tier, no card | Create a key at <https://aistudio.google.com/apikey>, then `export GEMINI_API_KEY=...` | `gemini:gemini-2.5-flash` |
+| **Groq** | Free tier, no card | Create a key at <https://console.groq.com/keys>, then `export GROQ_API_KEY=...` | `groq:llama-3.3-70b-versatile` |
+| **Ollama** | Free, runs locally | Install from <https://ollama.com>, then `ollama pull qwen2.5:7b` | `ollama:qwen2.5:7b` |
+| Anthropic | Paid | `export ANTHROPIC_API_KEY=...` | `claude-sonnet-5-5` |
+| Any OpenAI-compatible server | Varies | Base URL plus a key variable, or `none` | `openai:<model>@<base-url>#<KEY_ENV>` |
+
+A complete free run from the command line, with Gemini generating the tests and acting as the judge:
+
+```sh
+export GEMINI_API_KEY=...
+java -jar target/promptfuzzer.jar generate --task src/main/resources/examples/smart-home-commands.json \
+     --out suite.json --model gemini:gemini-2.5-flash --per-category 3
+java -jar target/promptfuzzer.jar run --suite suite.json --model gemini:gemini-2.5-flash \
+     --judge gemini:gemini-2.5-flash --out report.json
+```
+
+And fully offline with Ollama (no key, nothing leaves your computer):
+
+```sh
+ollama pull qwen2.5:7b
+java -jar target/promptfuzzer.jar run --suite suite.json --model ollama:qwen2.5:7b --judge ollama:qwen2.5:7b
+```
+
+Notes:
+- Free tiers allow only a few requests per minute. PromptFuzzer slows down to 10 requests per minute for Gemini
+  and 30 for Groq automatically, and retries the provider's 429 responses, so a 60-test run on Gemini takes a
+  few minutes. Model names and free-tier limits change over time; check the provider's model list if a model id
+  is rejected.
+- Free-tier models have no built-in price, so the cost estimate shows them as unpriced; the request ceiling
+  (`PF_MAX_REQUESTS`) still applies. Local servers are priced at zero.
+- Small local models make weaker generators and judges than hosted ones. For better test generation, use Gemini
+  or Groq as the generator and judge and Ollama as the target. If Ollama truncates long prompts, raise its context
+  window with `OLLAMA_CONTEXT_LENGTH=8192 ollama serve`.
+- Each preset sends its key only to its own URL, and the Ollama preset sends no key at all.
 
 The equivalent manual steps:
 
 ```sh
-./mvnw package          # builds target/promptfuzzer.jar and runs the 71 tests
+./mvnw package          # builds target/promptfuzzer.jar and runs the 77 tests
 java -jar target/promptfuzzer.jar
 ```
 
@@ -79,7 +122,8 @@ java -jar target/promptfuzzer.jar run --suite suite.json --model claude-sonnet-5
 ```
 
 `run` exits with status 1 when any model falls below `--min-pass-rate`, so a suite can gate a prompt change in
-CI. OpenAI-compatible servers (vLLM, Ollama, LM Studio, OpenAI) use `openai:<model>@<base-url>`.
+CI. Model specs work as in [Free and local models](#free-and-local-models); any other OpenAI-compatible server
+(vLLM, LM Studio, OpenRouter, OpenAI) uses `openai:<model>@<base-url>`, with `#KEY_ENV` or `#none` to choose its key.
 `--per-category 0` produces a rule-based suite with no API calls. `java -jar target/promptfuzzer.jar help` lists
 every option.
 
@@ -88,7 +132,9 @@ every option.
 | Variable | Default | Purpose |
 |---|---|---|
 | `ANTHROPIC_API_KEY` | | Anthropic models |
-| `OPENAI_API_KEY` | | OpenAI-compatible servers (any name matching `*_API_KEY`, `*_TOKEN` or `*_AUTH` can be chosen per target) |
+| `GEMINI_API_KEY` | | Google Gemini through its OpenAI-compatible endpoint (free tier) |
+| `GROQ_API_KEY` | | Groq (free tier) |
+| `OPENAI_API_KEY` | | Other OpenAI-compatible servers (any name matching `*_API_KEY`, `*_TOKEN` or `*_AUTH` can be chosen per target) |
 | `PF_ENDPOINT_AUTH` | | Bearer token for a custom HTTP endpoint target |
 | `PF_HOST` / `PF_PORT` | `127.0.0.1` / `7070` | Dashboard address |
 | `PF_DATA_DIR` | `promptfuzzer-data` | Saved suites and reports (plain JSON) |
@@ -96,7 +142,7 @@ every option.
 | `PF_MAX_REQUESTS` | `600` | Ceiling on API calls per run or generation |
 | `PF_MAX_TESTS` | `150` | Maximum suite size |
 | `PF_REQUESTS_PER_MINUTE` | `50` | Rate limit per provider |
-| `PF_DEFAULT_MODEL` | `claude-opus-5-5` | Default generator and target |
+| `PF_DEFAULT_MODEL` | first provider with a key | Default generator, judge and target, as a model spec such as `ollama:qwen2.5:7b` |
 
 Keys are read only from environment variables. The browser never sees them: it receives only whether each
 provider is configured, and a target can name a different variable but only one that looks like a key variable.
@@ -142,11 +188,13 @@ results.
 
 ## Testing
 
-`./mvnw verify` runs 71 tests: evaluator, JSON tools, safeguards (budget, rate limiter, retry and backoff,
+`./mvnw verify` runs 77 tests: evaluator, JSON tools, safeguards (budget, rate limiter, retry and backoff,
 retry-after parsing, key-variable allowlist), generation, report statistics, the CLI, and an end-to-end test that
 drives the whole HTTP API against a local OpenAI-compatible mock server. The mock returns a deliberately naive
 "model" that ignores negation and wraps some answers in code fences, plus an injected 429, and the test asserts
-the run retries the 429 and produces the expected `NEGATION_MISUNDERSTANDING` and `FORMATTING` clusters.
+the run retries the 429 and produces the expected `NEGATION_MISUNDERSTANDING` and `FORMATTING` clusters. A second
+end-to-end test runs `generate` and `run` from the CLI with no API key at all against a keyless local server,
+and checks that no Authorization header is ever sent.
 
 ## Limitations
 
@@ -165,7 +213,7 @@ the run retries the 429 and produces the expected `NEGATION_MISUNDERSTANDING` an
 - **Scope.** JSON-output tasks only for now, and a practical subset of JSON Schema (types, `required`,
   `properties`, `additionalProperties`, `enum`, `const`, `items`, numeric, length and item-count bounds, `pattern`), not
   `$ref` or `oneOf`. No streaming, tool-use or multi-turn tests yet.
-- **Not yet exercised against the live Anthropic API.** The Anthropic client is written against the official Java
-  SDK, and the full workflow is tested end to end against an OpenAI-compatible mock, but no API key was available
-  while this was built.
+- **Not yet exercised against live APIs.** The Anthropic client is written against the official Java SDK and the
+  Gemini, Groq and Ollama presets against their documented OpenAI-compatible endpoints, and the full workflow is
+  tested end to end against an OpenAI-compatible mock, but no API key was available while this was built.
 - Single-user and local by design: there is no authentication, and the server binds to `127.0.0.1`.

@@ -63,7 +63,7 @@ public final class CostEstimator {
             if (judge.pricing().isPresent()) {
                 double j = judge.pricing().get().cost((long) judgeCalls * JUDGE_INPUT_TOKENS, (long) judgeCalls * JUDGE_OUTPUT_TOKENS);
                 typical += j;
-                worst += judge.pricing().get().cost((long) judgeCalls * JUDGE_INPUT_TOKENS, (long) judgeCalls * 2048);
+                worst += judge.pricing().get().cost((long) judgeCalls * JUDGE_INPUT_TOKENS, (long) judgeCalls * 4096);
             } else {
                 allPriced = false;
             }

@@ -1,6 +1,9 @@
 package io.promptfuzzer.app;
 
+import io.promptfuzzer.llm.ProviderPreset;
+
 import java.nio.file.Path;
+import java.util.List;
 import java.util.function.Function;
 
 /**
@@ -10,7 +13,8 @@ import java.util.function.Function;
  * @param maxRequests      hard ceiling on API requests for any single generation or run
  * @param maxTests         largest suite that may be generated or run
  * @param requestsPerMinute client-side rate limit per provider
- * @param defaultModel     default generator, judge and target model
+ * @param defaultModel     default generator, judge and target model spec (see {@link ProviderPreset#parseSpec});
+ *                         without {@code PF_DEFAULT_MODEL}, the first of Anthropic, Gemini and Groq with a key set
  */
 public record AppConfig(
         String host,
@@ -31,7 +35,18 @@ public record AppConfig(
                 Integer.parseInt(get(env, "PF_MAX_REQUESTS", "600")),
                 Integer.parseInt(get(env, "PF_MAX_TESTS", "150")),
                 Integer.parseInt(get(env, "PF_REQUESTS_PER_MINUTE", "50")),
-                get(env, "PF_DEFAULT_MODEL", "claude-opus-5-5"));
+                get(env, "PF_DEFAULT_MODEL", defaultModel(env)));
+    }
+
+    private static String defaultModel(Function<String, String> env) {
+        for (ProviderPreset p : List.of(ProviderPreset.ANTHROPIC, ProviderPreset.GEMINI, ProviderPreset.GROQ)) {
+            String key = env.apply(p.keyEnv());
+            if (key != null && !key.isBlank()) {
+                String model = p.exampleModels().get(0);
+                return p == ProviderPreset.ANTHROPIC ? model : p.id() + ":" + model;
+            }
+        }
+        return ProviderPreset.ANTHROPIC.exampleModels().get(0);
     }
 
     private static String get(Function<String, String> env, String key, String fallback) {

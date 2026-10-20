@@ -51,9 +51,10 @@ async function route() {
 
 function renderKeyStatus() {
   const el = clear(document.getElementById('key-status'));
-  const ok = app.status?.providers?.ANTHROPIC;
+  const keyed = (app.status?.presets || []).filter((p) => p.available && p.keyEnv && p.provider !== 'ENDPOINT')
+    .map((p) => p.label.replace(/ \(.*\)$/, ''));
   el.append(
-    h('div', { class: ok ? 'key-ok' : 'key-missing' }, ok ? '● Anthropic key found' : '● No API key: demo only'),
+    h('div', { class: keyed.length ? 'key-ok' : 'key-missing' }, keyed.length ? `● Keys: ${keyed.join(', ')}` : '● No API key: demo, rules or Ollama'),
     h('div', { style: { marginTop: '4px' } },
       `Budget ceiling $${app.status?.limits?.maxCostUsd ?? '?'} per run`));
 }

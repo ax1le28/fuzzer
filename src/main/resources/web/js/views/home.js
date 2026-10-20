@@ -10,7 +10,7 @@ const FLOW = [
 ];
 
 export function renderHome(el) {
-  const hasKey = app.status?.providers?.ANTHROPIC;
+  const hasKey = (app.status?.presets || []).some((p) => p.available && p.keyEnv && p.provider !== 'ENDPOINT');
   el.append(
     h('section', { class: 'hero' },
       h('div', { class: 'eyebrow' }, 'Fuzz testing for LLM applications'),
@@ -21,7 +21,7 @@ export function renderHome(el) {
       h('div', { class: 'row', style: { marginTop: '22px' } },
         h('a', { class: 'btn btn-primary', href: '#/task' }, 'Start a new test'),
         h('a', { class: 'btn', href: '#/demo' }, 'Explore the demo report'),
-        hasKey ? null : h('span', { class: 'muted small' }, 'No API key detected. The demo works without one.'))),
+        hasKey ? null : h('span', { class: 'muted small' }, 'No API key detected. The demo works without one, and Gemini or Groq give free keys.'))),
     h('div', { class: 'flow' }, FLOW.map(([title, text], i) => h('div', { class: 'flow-step' },
       h('div', { class: 'n' }, `STEP ${i + 1}`), h('h3', {}, title), h('p', {}, text)))),
     h('div', { class: 'grid grid-3 section' },

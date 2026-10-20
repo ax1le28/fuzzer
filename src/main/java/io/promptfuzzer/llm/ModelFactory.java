@@ -31,21 +31,39 @@ public final class ModelFactory {
 
     /** True when the provider's default key variable is set (keys themselves are never exposed). */
     public boolean hasKey(ModelConfig.Provider provider) {
-        String v = env.apply(provider.defaultKeyEnv());
+        return hasKey(provider.defaultKeyEnv());
+    }
+
+    /** True when {@code keyEnv} is an allowed key variable and is set. */
+    public boolean hasKey(String keyEnv) {
+        if (keyEnv == null || !KEY_ENV.matcher(keyEnv).matches()) {
+            return false;
+        }
+        String v = env.apply(keyEnv);
         return v != null && !v.isBlank();
     }
 
+    /** True when a preset can be used as configured: it needs no key (endpoints authenticate optionally), or its key is set. */
+    public boolean available(ProviderPreset preset) {
+        return preset.keyEnv() == null || preset.provider() == ModelConfig.Provider.ENDPOINT || hasKey(preset.keyEnv());
+    }
+
     public ChatModel create(ModelConfig config) {
-        String keyEnv = Optional.ofNullable(config.apiKeyEnv()).filter(s -> !s.isBlank())
+        String keyEnv = Optional.ofNullable(config.apiKeyEnv()).map(String::trim).filter(s -> !s.isBlank())
                 .orElse(config.provider().defaultKeyEnv());
-        if (!KEY_ENV.matcher(keyEnv).matches()) {
+        boolean noKey = keyEnv.equalsIgnoreCase(ProviderPreset.NO_KEY) && config.provider() != ModelConfig.Provider.ANTHROPIC;
+        if (!noKey && !KEY_ENV.matcher(keyEnv).matches()) {
             throw new IllegalArgumentException("API key variable '" + keyEnv
-                    + "' is not allowed; use a name ending in API_KEY, TOKEN or AUTH");
+                    + "' is not allowed; use a name ending in API_KEY, TOKEN or AUTH, or 'none' for a server without a key");
         }
-        String key = env.apply(keyEnv);
+        String key = noKey ? null : env.apply(keyEnv);
         Pricing pricing = config.inputPricePerMTok() != null && config.outputPricePerMTok() != null
                 ? new Pricing(config.inputPricePerMTok(), config.outputPricePerMTok())
                 : null;
+        if (pricing == null && config.provider() == ModelConfig.Provider.OPENAI_COMPATIBLE
+                && config.baseUrl() != null && ProviderPreset.isLocalUrl(config.baseUrl())) {
+            pricing = new Pricing(0, 0); // a model on this machine costs nothing per token
+        }
 
         return switch (config.provider()) {
             case ANTHROPIC -> {
@@ -58,6 +76,10 @@ public final class ModelFactory {
             case OPENAI_COMPATIBLE -> {
                 requireModel(config);
                 String base = requireUrl(config.baseUrl(), "baseUrl");
+                if (!noKey && (key == null || key.isBlank()) && !ProviderPreset.isLocalUrl(base)) {
+                    throw new IllegalArgumentException(keyEnv + " is not set. Export the API key for " + base
+                            + " and restart, or choose a key variable of 'none' if the server needs no key.");
+                }
                 yield new OpenAiCompatibleChatModel(base, key, config.model(), pricing);
             }
             case ENDPOINT -> new HttpEndpointModel(

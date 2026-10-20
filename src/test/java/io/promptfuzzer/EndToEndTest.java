@@ -151,6 +151,28 @@ class EndToEndTest {
         assertEquals(0, list.get(0).path("results").size(), "listing omits per-test results");
     }
 
+    /** The free/local path: no API key at all, every model call goes to a keyless local server. */
+    @Test
+    void cliWorksEndToEndWithoutAnyApiKey(@TempDir Path dir) throws Exception {
+        java.nio.file.Files.writeString(dir.resolve("task.json"), Json.write(TestFixtures.smartHome()));
+        String model = "openai:local-model@" + llm.baseUrl() + "#none";
+        java.io.ByteArrayOutputStream log = new java.io.ByteArrayOutputStream();
+        java.io.PrintStream out = new java.io.PrintStream(log, true);
+        Map<String, String> noKeys = Map.of("PF_DATA_DIR", dir.toString(), "PF_REQUESTS_PER_MINUTE", "6000");
+
+        assertEquals(0, io.promptfuzzer.cli.CliAccess.run(noKeys, out, new String[]{"generate", "--task", dir.resolve("task.json").toString(),
+                "--out", dir.resolve("suite.json").toString(), "--model", model, "--categories", "NEGATION", "--per-category", "2"}), log.toString());
+        assertEquals(1, io.promptfuzzer.cli.CliAccess.run(noKeys, out, new String[]{"run", "--suite", dir.resolve("suite.json").toString(),
+                "--model", model, "--judge", model, "--out", dir.resolve("report.json").toString(), "--min-pass-rate", "0.99"}),
+                "the naive local model fails the gate: " + log);
+
+        RunReport report = Json.read(dir.resolve("report.json"), RunReport.class);
+        assertEquals(22, report.results().size());
+        assertTrue(report.results().stream().allMatch(r -> r.error() == null), "no call needed a key");
+        assertTrue(llm.authorizations().stream().allMatch("null"::equals), "no Authorization header was ever sent");
+        assertEquals(0.0, report.models().get(0).costUsd(), "a local server is priced at zero");
+    }
+
     @Test
     void ruleBasedGenerationNeedsNoModel() throws Exception {
         JsonNode task = get("/api/examples").get(1);

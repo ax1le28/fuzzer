@@ -3,16 +3,19 @@ import { api } from '../api.js';
 import { app, navigate } from '../app.js';
 import { store } from '../store.js';
 import { currentTask, validateTask } from './task.js';
+import { modelPicker, defaultModelConfig, keyProblem, toRequest } from '../models.js';
 
 export async function renderGenerate(el, _rest, params) {
   const task = currentTask();
   const problems = validateTask(task);
-  const hasKey = app.status?.providers?.ANTHROPIC;
   const categories = (app.categories || []).filter((c) => c.id !== 'BASELINE');
   const state = store.get('genOptions') || {
     categories: categories.map((c) => c.id), perCategory: 4, includeRules: true, seed: 42,
-    model: app.status?.defaultModel || 'claude-opus-5-5',
+    generator: defaultModelConfig(),
   };
+  if (!state.generator) state.generator = state.model ? { provider: 'ANTHROPIC', model: state.model } : defaultModelConfig();
+  delete state.model;
+  const canGenerate = () => !keyProblem(state.generator);
   const saveState = () => store.set('genOptions', state);
 
   const suiteBox = h('div', { class: 'section' });
@@ -53,6 +56,7 @@ export async function renderGenerate(el, _rest, params) {
     const summary = h('div', { class: 'muted small' });
     const updateSummary = () => {
       perLabel.textContent = `Cases per category: ${state.perCategory}`;
+      const hasKey = canGenerate();
       const ai = hasKey ? state.categories.length * state.perCategory : 0;
       const rules = state.includeRules ? task.examples.length * 4 : 0;
       summary.textContent = `≈ ${ai + rules} tests: ${ai} AI-generated (${hasKey ? state.categories.length : 0} generator calls) + ${rules} rule-based.`;
@@ -60,9 +64,7 @@ export async function renderGenerate(el, _rest, params) {
     updateSummary();
 
     const btn = h('button', { class: 'btn btn-primary', onclick: generate }, 'Generate suite');
-    const modelSelect = h('select', { disabled: !hasKey, onchange: (e) => { state.model = e.target.value; saveState(); } },
-      (app.status?.knownModels || []).map((m) => h('option', { value: m.id, selected: m.id === state.model },
-        `${m.id}  ($${m.inputPerMTok}/$${m.outputPerMTok} per MTok)`)));
+    const generatorPicker = modelPicker(state.generator, () => { saveState(); updateSummary(); }, { effort: true });
 
     async function generate() {
       btn.disabled = true;
@@ -71,9 +73,9 @@ export async function renderGenerate(el, _rest, params) {
       try {
         const suite = await api.generate({
           task,
-          generator: hasKey && state.perCategory > 0 ? { provider: 'ANTHROPIC', model: state.model } : null,
-          categories: hasKey ? state.categories : [],
-          perCategory: hasKey ? state.perCategory : 0,
+          generator: canGenerate() && state.perCategory > 0 ? toRequest(state.generator) : null,
+          categories: canGenerate() ? state.categories : [],
+          perCategory: canGenerate() ? state.perCategory : 0,
           includeRules: state.includeRules,
           seed: Number(state.seed) || 42,
         });
@@ -92,14 +94,13 @@ export async function renderGenerate(el, _rest, params) {
     return h('div', { class: 'card stack' },
       h('div', { class: 'card-head' }, h('h3', {}, `Task: ${task.name}`),
         h('span', { class: 'hint' }, `${task.examples.length} seed example${task.examples.length === 1 ? '' : 's'}`)),
-      hasKey ? null : h('div', { class: 'banner info' }, h('span', { class: 'icon' }, 'i'),
-        h('div', {}, 'No ANTHROPIC_API_KEY is set, so only rule-based tests can be generated. Export a key and restart to enable AI generation.')),
+      h('div', {}, h('div', { class: 'lbl', style: { marginBottom: '8px', fontWeight: 550 } }, 'Generator model'), generatorPicker,
+        h('div', { class: 'muted small', style: { marginTop: '4px' } }, 'Without a usable generator only rule-based tests are created. Free options: Gemini or Groq with a free key, or Ollama on your computer.')),
       h('div', {}, h('div', { class: 'lbl', style: { marginBottom: '8px', fontWeight: 550 } }, 'Categories'), chips),
-      h('div', { class: 'grid grid-3' },
+      h('div', { class: 'grid grid-2' },
         h('label', { class: 'field' }, perLabel,
-          h('input', { type: 'range', min: 1, max: 10, value: state.perCategory, disabled: !hasKey,
+          h('input', { type: 'range', min: 1, max: 10, value: state.perCategory,
             oninput: (e) => { state.perCategory = Number(e.target.value); saveState(); updateSummary(); } })),
-        h('label', { class: 'field' }, h('span', { class: 'lbl' }, 'Generator model'), modelSelect),
         h('label', { class: 'field' }, h('span', { class: 'lbl' }, 'Mutation seed'),
           h('input', { type: 'number', value: state.seed, oninput: (e) => { state.seed = e.target.value; saveState(); } }),
           h('small', {}, 'Same seed, same rule-based mutations.'))),

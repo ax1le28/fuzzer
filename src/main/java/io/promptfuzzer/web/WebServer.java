@@ -20,6 +20,7 @@ import io.promptfuzzer.llm.LlmException;
 import io.promptfuzzer.llm.ModelConfig;
 import io.promptfuzzer.llm.ModelFactory;
 import io.promptfuzzer.llm.Pricing;
+import io.promptfuzzer.llm.ProviderPreset;
 
 import java.io.InputStream;
 import java.util.ArrayList;
@@ -131,6 +132,23 @@ public final class WebServer {
                 "ANTHROPIC", factory.hasKey(ModelConfig.Provider.ANTHROPIC),
                 "OPENAI_COMPATIBLE", factory.hasKey(ModelConfig.Provider.OPENAI_COMPATIBLE)));
         out.put("defaultModel", config.defaultModel());
+        out.put("defaultTarget", safeSpec(config.defaultModel()));
+        List<Map<String, Object>> presets = new ArrayList<>();
+        for (ProviderPreset p : ProviderPreset.values()) {
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("id", p.id());
+            m.put("label", p.label());
+            m.put("provider", p.provider().name());
+            m.put("baseUrl", p.baseUrl());
+            m.put("keyEnv", p.keyEnv());
+            m.put("available", factory.available(p));
+            m.put("models", p.id().equals("anthropic") ? Pricing.known().keySet().stream().sorted().toList() : p.exampleModels());
+            m.put("requestsPerMinute", p.requestsPerMinute());
+            m.put("local", p.local());
+            m.put("note", p.note());
+            presets.add(m);
+        }
+        out.put("presets", presets);
         List<Map<String, Object>> models = new ArrayList<>();
         Pricing.known().entrySet().stream()
                 .sorted(Map.Entry.comparingByValue((a, b) -> Double.compare(b.inputPerMTok(), a.inputPerMTok())))
@@ -140,6 +158,14 @@ public final class WebServer {
         out.put("limits", Map.of("maxCostUsd", config.maxCostUsd(), "maxRequests", config.maxRequests(),
                 "maxTests", config.maxTests(), "requestsPerMinute", config.requestsPerMinute()));
         return out;
+    }
+
+    private static ModelConfig safeSpec(String spec) {
+        try {
+            return ProviderPreset.parseSpec(spec);
+        } catch (RuntimeException e) {
+            return ModelConfig.anthropic("claude-opus-5-5");
+        }
     }
 
     private static List<Map<String, String>> categories() {

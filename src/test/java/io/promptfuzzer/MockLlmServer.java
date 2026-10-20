@@ -21,6 +21,7 @@ public final class MockLlmServer implements AutoCloseable {
 
     private final HttpServer server;
     private final List<JsonNode> requests = new CopyOnWriteArrayList<>();
+    private final List<String> authorizations = new CopyOnWriteArrayList<>();
     private final AtomicInteger rateLimitsLeft;
 
     /** @param responder maps (system prompt, user message) to the reply text */
@@ -30,6 +31,7 @@ public final class MockLlmServer implements AutoCloseable {
         server.createContext("/v1/chat/completions", exchange -> {
             JsonNode body = Json.parse(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
             requests.add(body);
+            authorizations.add(String.valueOf(exchange.getRequestHeaders().getFirst("Authorization")));
             byte[] out;
             int status = 200;
             if (rateLimitsLeft.getAndDecrement() > 0) {
@@ -66,6 +68,11 @@ public final class MockLlmServer implements AutoCloseable {
 
     public List<JsonNode> requests() {
         return requests;
+    }
+
+    /** The Authorization header of each request, or "null" when none was sent. */
+    public List<String> authorizations() {
+        return authorizations;
     }
 
     @Override
