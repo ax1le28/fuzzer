@@ -1,0 +1,35 @@
+{
+  "id": "calendar-events",
+  "name": "Calendar event extractor",
+  "description": "Extracts a calendar event (title, date, start time, duration, attendees) from a scheduling request. Relative dates are resolved against a fixed 'today'.",
+  "systemPrompt": "You extract calendar events from scheduling requests. Today is Monday, 2026-10-19 (time zone: the user's local time).\n\nReturn one JSON object:\n{\"title\": \"<short title>\", \"date\": \"YYYY-MM-DD\", \"start_time\": \"HH:MM\" (24-hour), \"duration_minutes\": <integer>, \"attendees\": [\"<first names>\"]}\n\nRules:\n- Resolve relative dates (\"tomorrow\", \"next Friday\") against today.\n- If no duration is given, use 60 minutes.\n- attendees lists the other people mentioned, never the user; use [] when there are none.\n- If the date or start time cannot be determined, return {\"needs_clarification\": true, \"question\": \"<short question>\"} instead.\nRespond with JSON only.",
+  "outputSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "title": {"type": "string", "minLength": 1, "maxLength": 120},
+      "date": {"type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$"},
+      "start_time": {"type": "string", "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$"},
+      "duration_minutes": {"type": "integer", "minimum": 1, "maximum": 1440},
+      "attendees": {"type": "array", "items": {"type": "string"}},
+      "needs_clarification": {"type": "boolean"},
+      "question": {"type": "string"}
+    }
+  },
+  "clarificationOutput": {"needs_clarification": true},
+  "refusalOutput": null,
+  "semanticFields": ["title", "question"],
+  "ignoredFields": [],
+  "examples": [
+    {"input": "Lunch with Priya on Thursday at 12:30 for an hour", "expectedOutput": {"title": "Lunch with Priya", "date": "2026-10-22", "start_time": "12:30", "duration_minutes": 60, "attendees": ["Priya"]}},
+    {"input": "Book a 30 minute call with Marco and Lena tomorrow at 9am about the Q4 budget", "expectedOutput": {"title": "Q4 budget call", "date": "2026-10-20", "start_time": "09:00", "duration_minutes": 30, "attendees": ["Marco", "Lena"]}},
+    {"input": "Dentist appointment on November 3rd at 3pm, 45 minutes", "expectedOutput": {"title": "Dentist appointment", "date": "2026-11-03", "start_time": "15:00", "duration_minutes": 45, "attendees": []}}
+  ],
+  "comparison": {
+    "caseInsensitiveStrings": true,
+    "numericTolerance": 0.000001,
+    "unorderedArrays": true,
+    "nullEqualsMissing": true,
+    "strictFormatting": true
+  }
+}

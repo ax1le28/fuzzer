@@ -1,0 +1,6 @@
+target/
+promptfuzzer-data/
+*.iml
+.idea/
+.vscode/
+.DS_Store

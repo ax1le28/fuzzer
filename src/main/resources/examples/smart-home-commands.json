@@ -1,0 +1,37 @@
+{
+  "id": "smart-home-commands",
+  "name": "Smart home command parser",
+  "description": "Turns a resident's natural-language request into one JSON command for a smart-home hub. Must ask when information is missing and reject unsupported requests.",
+  "systemPrompt": "You are the command parser for a smart-home assistant. Convert the user's message into exactly one JSON command.\n\nDevices: lights, thermostat, blinds, door_lock, speaker.\nRooms: living_room, kitchen, bedroom, bathroom, office, hallway, all.\nActions:\n- turn_on / turn_off: lights, speaker\n- set: thermostat (value = temperature in °C, 10 to 30), lights (brightness 0-100), blinds (position 0-100, where 0 is open and 100 is fully closed), speaker (volume 0-100)\n- lock / unlock: door_lock\n\nOutput: {\"action\": ..., \"device\": ..., \"room\": ..., \"value\": <number, only for set>}\n\nIf the device, room or value you need is missing or unclear, respond with {\"action\": \"clarify\", \"question\": \"<short question>\"}.\nIf the request is for an unsupported device, room or action, or a value outside the allowed range, respond with {\"action\": \"reject\", \"reason\": \"<short reason>\"}.\nRespond with JSON only.",
+  "outputSchema": {
+    "type": "object",
+    "required": ["action"],
+    "additionalProperties": false,
+    "properties": {
+      "action": {"enum": ["turn_on", "turn_off", "set", "lock", "unlock", "clarify", "reject"]},
+      "device": {"enum": ["lights", "thermostat", "blinds", "door_lock", "speaker"]},
+      "room": {"enum": ["living_room", "kitchen", "bedroom", "bathroom", "office", "hallway", "all"]},
+      "value": {"type": "number", "minimum": 0, "maximum": 100},
+      "question": {"type": "string", "minLength": 1},
+      "reason": {"type": "string", "minLength": 1}
+    }
+  },
+  "clarificationOutput": {"action": "clarify"},
+  "refusalOutput": {"action": "reject"},
+  "semanticFields": ["question", "reason"],
+  "ignoredFields": [],
+  "examples": [
+    {"input": "Turn on the kitchen lights", "expectedOutput": {"action": "turn_on", "device": "lights", "room": "kitchen"}},
+    {"input": "Set the bedroom thermostat to 21 degrees", "expectedOutput": {"action": "set", "device": "thermostat", "room": "bedroom", "value": 21}},
+    {"input": "Lock the hallway door", "expectedOutput": {"action": "lock", "device": "door_lock", "room": "hallway"}},
+    {"input": "Close the living room blinds halfway", "expectedOutput": {"action": "set", "device": "blinds", "room": "living_room", "value": 50}},
+    {"input": "Turn the office speaker volume down to 20", "expectedOutput": {"action": "set", "device": "speaker", "room": "office", "value": 20}}
+  ],
+  "comparison": {
+    "caseInsensitiveStrings": true,
+    "numericTolerance": 0.000001,
+    "unorderedArrays": true,
+    "nullEqualsMissing": true,
+    "strictFormatting": true
+  }
+}
