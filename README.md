@@ -3,6 +3,7 @@
 **Fuzz testing for LLM applications: find out how your AI feature breaks before your users do.**
 
 ![Java 21](https://img.shields.io/badge/Java-21-orange?logo=openjdk&logoColor=white)
+![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)
 [![CI](https://github.com/ax1le28/fuzzer/actions/workflows/ci.yml/badge.svg)](https://github.com/ax1le28/fuzzer/actions/workflows/ci.yml)
 ![Tests: 90](https://img.shields.io/badge/tests-90-brightgreen)
 ![Runs locally](https://img.shields.io/badge/runs-locally-informational)
@@ -41,6 +42,7 @@ Define task → Generate tests → Run tests → Analyze failures → Reliabilit
 - [Architecture](#architecture)
 - [Tests](#tests)
 - [Limitations](#limitations)
+- [License](#license)
 
 ## Quick start
 
@@ -294,3 +296,7 @@ CI runs the same build on every push and pull request.
   presets against their documented OpenAI-compatible endpoints, but they have not yet been exercised against
   live APIs in this repository's tests.
 - **Single-user and local by design.** There is no authentication, and the server binds to `127.0.0.1`.
+
+## License
+
+[MIT](LICENSE)
